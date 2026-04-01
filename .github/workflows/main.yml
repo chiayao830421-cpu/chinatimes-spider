@@ -1,0 +1,72 @@
+name: ChinaTimes Crawler
+
+on:
+  schedule:
+    - cron: '*/10 * * * *' # 💡 每 15 分鐘自動執行一次
+  workflow_dispatch:      # 💡 允許你手動按按鈕執行
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests beautifulsoup4 lxml
+
+    - name: Run Crawler
+      run: |
+        python -c "
+        import requests
+        from bs4 import BeautifulSoup
+        import time
+
+        # 偽裝成真人的 Header
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        
+        url = 'https://www.chinatimes.com/realtimenews/260407'
+        
+        try:
+            res = requests.get(url, headers=headers)
+            soup = BeautifulSoup(res.text, 'lxml')
+            
+            # 抓取前 10 則新聞
+            articles = soup.select('.article-list .title a')[:10]
+            
+            # 組裝成 RSS 格式
+            rss_content = '<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\\n<rss version=\"2.0\">\\n<channel>\\n<title>中時政治即時</title>\\n'
+            
+            for a in articles:
+                title = a.text.strip()
+                link = 'https://www.chinatimes.com' + a['href']
+                rss_content += f'<item>\\n<title>{title}</title>\\n<link>{link}</link>\\n</item>\\n'
+                
+            rss_content += '</channel>\\n</rss>'
+            
+            # 存成檔案
+            with open('chinatimes.xml', 'w', encoding='utf-8') as f:
+                f.write(rss_content)
+                
+            print('爬取成功！')
+        except Exception as e:
+            print(f'爬取失敗: {e}')
+        "
+
+    - name: Commit and Push
+      run: |
+        git config --global user.name "GitHub Action"
+        git config --global user.email "action@github.com"
+        git add chinatimes.xml
+        git commit -m "Update news" || exit 0
+        git push
