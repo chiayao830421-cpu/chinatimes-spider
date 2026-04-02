@@ -32,9 +32,8 @@ jobs:
         import time
 
         try:
-            with sync_playwright() as p:
+           with sync_playwright() as p:
                 print('正在啟動 Chrome 瀏覽器...')
-                # 🛡️ 模擬真人的視窗大小，徹底騙過 Cloudflare
                 browser = p.chromium.launch(headless=True)
                 context = browser.new_context(
                     viewport={'width': 1280, 'height': 800},
@@ -45,39 +44,48 @@ jobs:
                 print('正在前往中時電子報...')
                 page.goto('https://www.chinatimes.com/realtimenews/260407', wait_until='networkidle')
                 
-                # ⏳ 稍等 5 秒，確保五秒盾自己轉完
                 time.sleep(5)
                 
-                # 📝 取得解析後的網頁原始碼
                 html = page.content()
                 browser.close()
-               soup = BeautifulSoup(html, 'lxml')
                 
-                # 🛡️ 抓取包含標題和摘要的整個新聞卡片區塊
-                cards = soup.select('.article-list .article-vertical')[:10]
+                soup = BeautifulSoup(html, 'lxml')
                 
-                if cards:
-                    rss_content = '<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\\n<rss version=\"2.0\">\\n<channel>\\n<title>中時政治即時</title>\\n'
+                # 🎯 改回最保險的抓取方式
+                articles = soup.select('.article-list .title a')[:10]
+                
+                if articles:
+                    rss_content = '<?xml version="1.0" encoding="UTF-8" ?>\n<rss version="2.0">\n<channel>\n<title>中時政治即時</title>\n'
                     
-                    for card in cards:
-                        # 抓取標題與連結
-                        a_tag = card.select_one('.title a')
-                        title = a_tag.text.strip()
-                        link = 'https://www.chinatimes.com' + a_tag['href']
+                    for a in articles:
+                        try:
+                            title = a.text.strip()
+                            link = 'https://www.chinatimes.com' + a['href']
+                            
+                            # 🛡️ 用最安全的方式往上找卡片，再往下找摘要
+                            parent_card = a.find_parent('div', class_='article-vertical')
+                            summary = '無摘要'
+                            
+                            if parent_card:
+                                intro_tag = parent_card.select_one('.intro')
+                                if intro_tag:
+                                    summary = intro_tag.text.strip()
+                            
+                            # 💡 乾淨處理換行符號，避免 XML 格式壞掉
+                            summary = summary.replace('\n', ' ').replace('\r', '')
+                            
+                            rss_content += f'<item>\n<title>{title}</title>\n<link>{link}</link>\n<description>{summary}</description>\n</item>\n'
+                        except Exception as inner_e:
+                            print(f'單則新聞解析失敗，跳過: {inner_e}')
+                            continue
                         
-                        # 🎯 抓取列表中自帶的簡單摘要
-                        intro_tag = card.select_one('.intro')
-                        summary = intro_tag.text.strip() if intro_tag else '無摘要'
-                        
-                        rss_content += f'<item>\\n<title>{title}</title>\\n<link>{link}</link>\\n<description>{summary}</description>\\n</item>\\n'
-                        
-                    rss_content += '</channel>\\n</rss>'
+                    rss_content += '</channel>\n</rss>'
                     
                     with open('chinatimes.xml', 'w', encoding='utf-8') as f:
                         f.write(rss_content)
-                    print('成功！已抓到標題與摘要！') 
+                    print('成功！已抓到標題與摘要！')
                 else:
-                    print('警告：雖然打開了網頁，但沒抓到新聞。')
+                    print('警告：打開了網頁，但沒抓到任何新聞。')
                     
         except Exception as e:
             print(f'錯誤: {e}')
