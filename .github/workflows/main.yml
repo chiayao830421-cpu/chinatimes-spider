@@ -2,7 +2,7 @@ name: ChinaTimes Crawler
 
 on:
   schedule:
-    - cron: '*/15 * * * *' # 每 15 分鐘自動執行一次
+    - cron: '*/10 * * * *' # 每 15 分鐘自動執行一次
   workflow_dispatch:      # 允許手動執行
 
 jobs:
