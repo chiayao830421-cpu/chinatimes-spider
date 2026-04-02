@@ -95,11 +95,11 @@ jobs:
             print(f'錯誤: {e}')
         "
         
-
     - name: Commit and Push
       run: |
         git config --global user.name "GitHub Action"
         git config --global user.email "action@github.com"
         git add chinatimes.xml
-        git commit -m "Update news with Playwright" || exit 0
-        git push
+        # 🛡️ 強迫建立 commit，不管檔案內容有沒有變，並強制推送到 main 分支
+        git commit -m "Update news with summary: $(date)" || exit 0
+        git push origin HEAD:main --force
