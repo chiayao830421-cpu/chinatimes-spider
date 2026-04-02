@@ -32,7 +32,7 @@ jobs:
         import time
 
         try:
-           with sync_playwright() as p:
+            with sync_playwright() as p:
                 print('正在啟動 Chrome 瀏覽器...')
                 browser = p.chromium.launch(headless=True)
                 context = browser.new_context(
@@ -51,32 +51,36 @@ jobs:
                 
                 soup = BeautifulSoup(html, 'lxml')
                 
-                # 🎯 改回最保險的抓取方式
-                articles = soup.select('.article-list .title a')[:10]
+                # 🎯 抓取列表中所有的文章區塊
+                articles = soup.select('ul.article-list > li')[:10]
                 
                 if articles:
                     rss_content = '<?xml version="1.0" encoding="UTF-8" ?>\n<rss version="2.0">\n<channel>\n<title>中時政治即時</title>\n'
                     
-                    for a in articles:
+                    for art in articles:
                         try:
-                            title = a.text.strip()
-                            link = 'https://www.chinatimes.com' + a['href']
+                            # 1. 抓取標題和網址
+                            title_tag = art.select_one('h3.title a, .title a')
+                            if not title_tag:
+                                continue
+                                
+                            title = title_tag.text.strip()
+                            link = 'https://www.chinatimes.com' + title_tag['href']
                             
-                            # 🛡️ 用最安全的方式往上找卡片，再往下找摘要
-                            parent_card = a.find_parent('div', class_='article-vertical')
+                            # 2. 🎯 「位置對準術」：抓取標題下方的第一個 p 標籤（通常就是摘要）
                             summary = '無摘要'
+                            p_tag = art.select_one('p')
+                            if p_tag:
+                                summary = p_tag.text.strip()
+                            else:
+                                # 備用方案：如果沒有 p 標籤，就抓除了標題以外的純文字
+                                summary = art.text.replace(title, '').strip()
                             
-                            if parent_card:
-                                intro_tag = parent_card.select_one('.intro')
-                                if intro_tag:
-                                    summary = intro_tag.text.strip()
-                            
-                            # 💡 乾淨處理換行符號，避免 XML 格式壞掉
-                            summary = summary.replace('\n', ' ').replace('\r', '')
+                            # 清理多餘的換行與空白
+                            summary = ' '.join(summary.split())
                             
                             rss_content += f'<item>\n<title>{title}</title>\n<link>{link}</link>\n<description>{summary}</description>\n</item>\n'
                         except Exception as inner_e:
-                            print(f'單則新聞解析失敗，跳過: {inner_e}')
                             continue
                         
                     rss_content += '</channel>\n</rss>'
