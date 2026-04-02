@@ -2,8 +2,8 @@ name: ChinaTimes Crawler
 
 on:
   schedule:
-    - cron: '*/10 * * * *' # 💡 每 15 分鐘自動執行一次
-  workflow_dispatch:      # 💡 允許你手動按按鈕執行
+    - cron: '*/15 * * * *' # 每 15 分鐘自動執行一次
+  workflow_dispatch:      # 允許手動執行
 
 jobs:
   build:
@@ -21,46 +21,58 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 lxml
+        pip install beautifulsoup4 lxml playwright
+        playwright install chromium # 🚀 在雲端安裝真的 Chrome 瀏覽器
 
     - name: Run Crawler
       run: |
         python -c "
-        import requests
+        from playwright.sync_api import sync_playwright
         from bs4 import BeautifulSoup
         import time
 
-        # 偽裝成真人的 Header
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-        
-        url = 'https://www.chinatimes.com/realtimenews/260407'
-        
         try:
-            res = requests.get(url, headers=headers)
-            soup = BeautifulSoup(res.text, 'lxml')
-            
-            # 抓取前 10 則新聞
-            articles = soup.select('.article-list .title a')[:10]
-            
-            # 組裝成 RSS 格式
-            rss_content = '<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\\n<rss version=\"2.0\">\\n<channel>\\n<title>中時政治即時</title>\\n'
-            
-            for a in articles:
-                title = a.text.strip()
-                link = 'https://www.chinatimes.com' + a['href']
-                rss_content += f'<item>\\n<title>{title}</title>\\n<link>{link}</link>\\n</item>\\n'
+            with sync_playwright() as p:
+                print('正在啟動 Chrome 瀏覽器...')
+                # 🛡️ 模擬真人的視窗大小，徹底騙過 Cloudflare
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    viewport={'width': 1280, 'height': 800},
+                    user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                )
+                page = context.new_page()
                 
-            rss_content += '</channel>\\n</rss>'
-            
-            # 存成檔案
-            with open('chinatimes.xml', 'w', encoding='utf-8') as f:
-                f.write(rss_content)
+                print('正在前往中時電子報...')
+                page.goto('https://www.chinatimes.com/realtimenews/260407', wait_until='networkidle')
                 
-            print('爬取成功！')
+                # ⏳ 稍等 5 秒，確保五秒盾自己轉完
+                time.sleep(5)
+                
+                # 📝 取得解析後的網頁原始碼
+                html = page.content()
+                browser.close()
+                
+                soup = BeautifulSoup(html, 'lxml')
+                articles = soup.select('.article-list .title a')[:10]
+                
+                if articles:
+                    rss_content = '<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\\n<rss version=\"2.0\">\\n<channel>\\n<title>中時政治即時</title>\\n'
+                    
+                    for a in articles:
+                        title = a.text.strip()
+                        link = 'https://www.chinatimes.com' + a['href']
+                        rss_content += f'<item>\\n<title>{title}</title>\\n<link>{link}</link>\\n</item>\\n'
+                        
+                    rss_content += '</channel>\\n</rss>'
+                    
+                    with open('chinatimes.xml', 'w', encoding='utf-8') as f:
+                        f.write(rss_content)
+                    print('成功！已抓到新聞！')
+                else:
+                    print('警告：雖然打開了網頁，但沒抓到新聞。')
+                    
         except Exception as e:
-            print(f'爬取失敗: {e}')
+            print(f'錯誤: {e}')
         "
 
     - name: Commit and Push
@@ -68,5 +80,5 @@ jobs:
         git config --global user.name "GitHub Action"
         git config --global user.email "action@github.com"
         git add chinatimes.xml
-        git commit -m "Update news" || exit 0
+        git commit -m "Update news with Playwright" || exit 0
         git push
