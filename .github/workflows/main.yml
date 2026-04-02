@@ -44,6 +44,7 @@ jobs:
                 print('正在前往中時電子報...')
                 page.goto('https://www.chinatimes.com/realtimenews/260407', wait_until='networkidle')
                 
+                # ⏳ 稍等 5 秒，確保動態內容與摘要載入完畢
                 time.sleep(5)
                 
                 html = page.content()
@@ -51,45 +52,43 @@ jobs:
                 
                 soup = BeautifulSoup(html, 'lxml')
                 
-                # 🎯 抓取列表中所有的文章區塊
-                articles = soup.select('ul.article-list > li')[:10]
+                # 🎯 核心修正：直接精準抓取中時的新聞卡片區塊
+                cards = soup.select('div.articlebox-v')[:10]
                 
-                if articles:
+                if cards:
                     rss_content = '<?xml version="1.0" encoding="UTF-8" ?>\n<rss version="2.0">\n<channel>\n<title>中時政治即時</title>\n'
                     
-                    for art in articles:
+                    for card in cards:
                         try:
                             # 1. 抓取標題和網址
-                            title_tag = art.select_one('h3.title a, .title a')
+                            title_tag = card.select_one('h3.title a')
                             if not title_tag:
                                 continue
                                 
                             title = title_tag.text.strip()
                             link = 'https://www.chinatimes.com' + title_tag['href']
                             
-                            # 2. 🎯 「位置對準術」：抓取標題下方的第一個 p 標籤（通常就是摘要）
+                            # 2. 抓取摘要（精準對準 p.intro）
                             summary = '無摘要'
-                            p_tag = art.select_one('p')
-                            if p_tag:
-                                summary = p_tag.text.strip()
-                            else:
-                                # 備用方案：如果沒有 p 標籤，就抓除了標題以外的純文字
-                                summary = art.text.replace(title, '').strip()
+                            intro_tag = card.select_one('p.intro')
+                            if intro_tag:
+                                summary = intro_tag.text.strip()
                             
-                            # 清理多餘的換行與空白
-                            summary = ' '.join(summary.split())
+                            # 清理 XML 不允許的特殊符號
+                            summary = summary.replace('\n', ' ').replace('\r', '').replace('"', "'")
                             
                             rss_content += f'<item>\n<title>{title}</title>\n<link>{link}</link>\n<description>{summary}</description>\n</item>\n'
                         except Exception as inner_e:
+                            print(f'單則解析失敗: {inner_e}')
                             continue
                         
                     rss_content += '</channel>\n</rss>'
                     
                     with open('chinatimes.xml', 'w', encoding='utf-8') as f:
                         f.write(rss_content)
-                    print('成功！已抓到標題與摘要！')
+                    print('成功！已抓到標題、連結與摘要！')
                 else:
-                    print('警告：打開了網頁，但沒抓到任何新聞。')
+                    print('警告：打開了網頁，但沒抓到 articlebox-v。')
                     
         except Exception as e:
             print(f'錯誤: {e}')
