@@ -25,7 +25,7 @@ def main():
     # 1. 啟動中研院斷詞 (對標題進行斷詞)
     titles = [news.get('title', '') for news in news_list]
     print("正在進行中研院斷詞...")
-    ws_driver = CkipWordSegmenter(level=3)
+    ws_driver = CkipWordSegmenter()
     ws_results = ws_driver(titles)
 
     # 2. 建立每則新聞的關鍵字特徵
