@@ -23,8 +23,7 @@ jobs:
       with:
         path: ~/.cache/huggingface
         key: ${{ runner.os }}-transformers-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-transformers-
+        restore-keys: ${{ runner.os }}-transformers-
 
     - name: Install dependencies
       run: |
@@ -36,5 +35,4 @@ jobs:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         NEWS_DATA: ${{ github.event.client_payload.news_data }}
-      run: |
-        python nlp_processor.py
+      run: python nlp_processor.py
