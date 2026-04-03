@@ -1,7 +1,7 @@
 import os
 import sys
 import json
-import re  # 引入正規表達式
+import re
 import requests
 from sentence_transformers import SentenceTransformer, util
 
@@ -17,29 +17,50 @@ def main():
     
     print(f"收到原始資料開頭: {news_data_str[:100]}...") # 方便 debug
 
-    # 2. 暴力正規化解析 (專治沒有引號的 JavaScript Key)
+    # 2. 物理級暴力解析 (不走 JSON 路線，直接用正則抓取欄位)
     news_list = []
+    print("啟動物理級欄位擷取術...")
+    
+    # 我們用正規表達式直接尋找 {title:..., summary:..., link:...} 的結構
+    # 這個正則會無視有沒有雙引號、單引號或中文全形引號
+    pattern = re.compile(r'title\s*:\s*(.*?)\s*,\s*summary\s*:\s*(.*?)\s*,\s*link\s*:\s*(.*?)\s*[}]')
+    
+    # 為了防止 summary 或 title 裡面有逗號導致切錯，我們用更寬鬆的貪婪匹配來抓取
+    # 這裡直接用一組更保險的切分法：
     try:
-        print("嘗試使用正規表達式修復 JavaScript Object 格式...")
+        # 先把整串資料用 "}," 或是 "}" 切開成一條一條的新聞
+        raw_blocks = re.split(r'}\s*,\s*{|\[\s*{|}\s*\]', news_data_str)
         
-        # 這一行會把 {title: "..."} 變成 {"title": "..."}
-        # 也就是在所有的 key (如 title, summary, link) 前後加上標準雙引號
-        fixed_str = re.sub(r'([{,]\s*)(\w+):', r'\1"\2":', news_data_str)
-        
-        # 將修正後的字串轉成 JSON
-        news_list = json.loads(fixed_str)
-        print(f"\n🎉 成功接收到資料！總共抓取了 {len(news_list)} 則新聞。")
+        for block in raw_blocks:
+            if not block.strip():
+                continue
+                
+            # 在每個區塊裡單獨撈出欄位
+            title_match = re.search(r'title\s*:\s*(.*?)(?=(?:,\s*summary:)|$)', block)
+            summary_match = re.search(r'summary\s*:\s*(.*?)(?=(?:,\s*link:)|$)', block)
+            link_match = re.search(r'link\s*:\s*(.*)', block)
+            
+            title = title_match.group(1).strip() if title_match else ""
+            summary = summary_match.group(1).strip() if summary_match else ""
+            link = link_match.group(1).strip() if link_match else ""
+            
+            # 去除頭尾可能殘留的單引號、雙引號
+            title = title.strip('\'" ')
+            summary = summary.strip('\'" ')
+            link = link.strip('\'" ')
+            
+            if title: # 只要有標題就算成功
+                news_list.append({
+                    "title": title,
+                    "summary": summary,
+                    "link": link
+                })
+                
+        print(f"\n🎉 成功接收到資料！總共暴力抓取了 {len(news_list)} 則新聞。")
         
     except Exception as e:
-        print(f"Regex + JSON 解析失敗: {e}")
-        print("嘗試最後的降級手段 (AST)...")
-        try:
-            import ast
-            news_list = ast.literal_eval(news_data_str)
-            print("🔥 AST 解析成功！")
-        except Exception as e2:
-            print(f"所有解析方法均失敗: {e2}")
-            return
+        print(f"物理解析極限失敗: {e}")
+        return
 
     if len(news_list) == 0:
         print("沒有新聞資料可以處理")
@@ -52,8 +73,8 @@ def main():
     # 4. 把新聞的標題 + 摘要結合成一段話算向量
     sentences = []
     for item in news_list:
-        title = item.get('title', '').strip()
-        summary = item.get('summary', '').strip()
+        title = item.get('title', '')
+        summary = item.get('summary', '')
         text = f"{title} {summary if summary else title}"
         sentences.append(text)
 
@@ -114,7 +135,7 @@ def main():
             
     if single_groups:
         message += "━━━━━━━━━━━━━━━━━━━\n"
-        message += "📰 其他（獨立事件） \n\n"
+        message += "📰 其他 \n\n"
         for g in single_groups:
             n_idx = g[0]
             item = news_list[n_idx]
