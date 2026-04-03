@@ -1,7 +1,5 @@
 import os
 import sys
-import json
-import re
 import requests
 from sentence_transformers import SentenceTransformer, util
 
@@ -17,42 +15,73 @@ def send_telegram(token, chat_id, text):
 
 def main():
     if len(sys.argv) < 4: 
-        print("參數不足")
+        print("❌ 參數不足")
         return
     token, chat_id, news_data_str = sys.argv[1], sys.argv[2], sys.argv[3]
     
-    print(f"--- 偵測到原始資料 ---")
-    print(news_data_str[:200]) # Log 顯示開頭
+    print("--- 原始資料開頭 ---")
+    print(news_data_str[:300])
 
-    # 1. 通殺型正則解析：支援 "title": 或 title: 
-    # 邏輯：抓取 title 到 summary 之間、summary 到 link 之間、link 到下一個區塊之間的文字
+    # 1. 暴力字串硬切術 (完全不管 JSON 格式或正則)
     news_list = []
-    # 修正後的正則，同時相容有引號與無引號的欄位名
-    pattern = re.compile(
-        r'(?:"?title"?)\s*:\s*(.*?)\s*,\s*'
-        r'(?:"?summary"?)\s*:\s*(.*?)\s*,\s*'
-        r'(?:"?link"?)\s*:\s*(.*?)\s*(?:,|\}|\]|$)', 
-        re.DOTALL
-    )
     
-    blocks = pattern.findall(news_data_str)
+    # 用 link 的網址結構作為每一則新聞的切分點
+    # 先把資料用 "https://www.chinatimes.com" 切開
+    raw_blocks = news_data_str.split("https://www.chinatimes.com")
     
-    for b in blocks:
-        # 去除頭尾引號與雜質
-        t = b[0].strip('\'" ')
-        s = b[1].strip('\'" ')
-        l = b[2].strip('\'" ')
-        if t and len(t) > 2: # 確保不是空字串
-            news_list.append({"title": t, "summary": s, "link": l, "media": "中時新聞網"})
+    print(f"初步切分出 {len(raw_blocks)} 個區塊...")
+    
+    for i in range(len(raw_blocks) - 1):
+        # 當前區塊含有前一則新聞的標題和摘要，下一區塊開頭是當前新聞的 link 後半段
+        curr_block = raw_blocks[i]
+        next_block = raw_blocks[i+1]
+        
+        # 1. 撈 link (從 next_block 的開頭撈到雙引號結束)
+        link_suffix = next_block.split('"')[0].split("'")[0].split("}")[0]
+        full_link = "https://www.chinatimes.com" + link_suffix
+        
+        # 2. 撈 title (在 curr_block 裡找 title: 或 "title": 之後的字)
+        title = ""
+        if "title" in curr_block:
+            # 找到最後一個 title 出現的位置
+            t_idx = curr_block.rfind("title")
+            # 往後找冒號
+            colon_idx = curr_block.find(":", t_idx)
+            # 撈出冒號到逗號或引號之間的字
+            t_data = curr_block[colon_idx+1:].strip()
+            # 移除最外層的引號或括號
+            title = t_data.split('",')[0].split("',")[0].split(',"summary')[0].split(",summary")[0]
+            title = title.strip('\'" {}[]')
+            
+        # 3. 撈 summary
+        summary = ""
+        if "summary" in curr_block:
+            s_idx = curr_block.rfind("summary")
+            colon_idx = curr_block.find(":", s_idx)
+            s_data = curr_block[colon_idx+1:].strip()
+            summary = s_data.split('",')[0].split("',")[0].split(',"link')[0].split(",link")[0]
+            summary = summary.strip('\'" {}[]')
+            
+        # 如果沒撈到 summary，就用 title 頂替
+        if not summary:
+            summary = title
+            
+        if title and len(title) > 2:
+            news_list.append({
+                "title": title,
+                "summary": summary,
+                "link": full_link,
+                "media": "中時新聞網"
+            })
 
-    print(f"--- 解析結果 ---")
-    print(f"成功擷取到 {len(news_list)} 則新聞")
+    print(f"--- 暴力解析結果 ---")
+    print(f"成功硬切出 {len(news_list)} 則新聞")
 
     if not news_list:
-        print("❌ 解析後列表為空，請檢查 n8n 傳送格式！")
+        print("❌ 依然無法解析，請查看上方原始資料。")
         return
 
-    # 2. 語意向量分組
+    # 2. 載入 AI 模型並進行分組
     print("正在載入 AI 模型並進行分組...")
     model = SentenceTransformer('shibing624/text2vec-base-chinese')
     sentences = [f"{n['title']} {n['summary']}" for n in news_list]
@@ -69,7 +98,7 @@ def main():
                 processed[j] = True
         groups.append(curr)
 
-    # 3. 發送訊息
+    # 3. 按熱點一則則發送
     groups.sort(key=len, reverse=True)
     hot_groups = [g for g in groups if len(g) > 1]
     other_groups = [g for g in groups if len(g) == 1]
