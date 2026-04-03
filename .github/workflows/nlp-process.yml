@@ -3,7 +3,7 @@ name: ChinaTimes NLP Grouping
 on:
   workflow_dispatch:
   repository_dispatch:
-    types: [trigger-nlp]
+    types: [trigger_new_nlp]
 
 jobs:
   build:
