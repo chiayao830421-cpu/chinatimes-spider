@@ -1,7 +1,7 @@
 import os
 import json
 import requests
-from ckip_transformers.nlp import CkipWordSegmenter
+from sentence_transformers import SentenceTransformer, util
 
 def main():
     token = os.environ.get("TELEGRAM_TOKEN")
@@ -16,140 +16,135 @@ def main():
         print("沒有收到任何新聞資料")
         return
 
-    # 1. 【核心修正】強大防呆解析：把 50 篇新聞全部救回來
+    # 1. 解析 n8n 的 allNews 格式
     try:
         raw_data = json.loads(news_data_str)
+        news_list = []
         
-        # 判斷 n8n 傳過來的各種變形格式
-        if isinstance(raw_data, list):
+        if isinstance(raw_data, dict):
+            if "allNews" in raw_data:
+                news_list = raw_data["allNews"]
+            else:
+                for val in raw_data.values():
+                    if isinstance(val, list):
+                        news_list = val
+                        break
+                if not news_list:
+                    news_list = [raw_data]
+        elif isinstance(raw_data, list):
             news_list = raw_data
-        elif isinstance(raw_data, dict) and "data" in raw_data:
-            news_list = raw_data["data"]
-        else:
-            news_list = [raw_data] if raw_data else []
             
-        print("\n" + "="*50)
-        print(f"🎉 成功接收到資料！總共抓取了 {len(news_list)} 則新聞。")
-        print("="*50 + "\n")
+        print(f"\n🎉 成功接收到資料！總共抓取了 {len(news_list)} 則新聞。")
         
     except Exception as e:
         print(f"解析 JSON 失敗: {e}")
         return
 
-    if not news_list:
+    if len(news_list) == 0:
         print("沒有新聞資料可以處理")
         return
 
-    # 2. 啟動中研院斷詞 (拿掉 level=3 以免報錯)
-    titles = [news.get('title', '') for news in news_list]
-    print("正在進行中研院斷詞，請稍候...")
-    ws_driver = CkipWordSegmenter()
-    ws_results = ws_driver(titles)
+    # 2. 載入免費的中文向量模型（如果有 Cache，這步會超快）
+    print("正在載入中文向量模型，請稍候...")
+    model = SentenceTransformer('shibing624/text2vec-base-chinese')
 
-    # 3. 建立每則新聞的關鍵字特徵
-    news_keywords = []
-    for ws in ws_results:
-        keywords = set([word for word in ws if len(word) > 1])
-        news_keywords.append(keywords)
+    # 3. 把新聞的標題 + 摘要結合成一段話算向量
+    sentences = []
+    for item in news_list:
+        title = item.get('title', '').strip()
+        summary = item.get('summary', '').strip()
+        # 如果沒摘要就用標題
+        text = f"{title} {summary if summary else title}"
+        sentences.append(text)
 
-    # 4. 智慧分組 (Jaccard 相似度)
+    print("正在進行語意向量計算...")
+    embeddings = model.encode(sentences, convert_to_tensor=True)
+
+    # 4. 使用向量相似度進行分組
     groups = []
-    for i, keywords in enumerate(news_keywords):
-        placed = False
-        for group in groups:
-            sample_idx = group[0]
-            intersection = keywords.intersection(news_keywords[sample_idx])
-            union = keywords.union(news_keywords[sample_idx])
-            similarity = len(intersection) / len(union) if len(union) > 0 else 0
+    processed = [False] * len(news_list)
+
+    for i in range(len(news_list)):
+        if processed[i]:
+            continue
             
-            if similarity > 0.25: # 相似度門檻
-                group.append(i)
-                placed = True
-                break
-        if not placed:
-            groups.append([i])
+        current_group = [i]
+        processed[i] = True
+        
+        for j in range(i + 1, len(news_list)):
+            if processed[j]:
+                continue
+                
+            # 計算兩篇新聞的語意相似度
+            similarity = util.cos_sim(embeddings[i], embeddings[j]).item()
+            
+            # 閾值設定 0.65，大於這個值代表高機率在講同一件事
+            if similarity > 0.65:
+                current_group.append(j)
+                processed[j] = True
+                
+        groups.append(current_group)
 
-    # 5. 依照關聯數量排序，把熱點排在最前面
+    # 5. 排序與發送邏輯（與之前相同）
     groups.sort(key=lambda x: len(x), reverse=True)
-
-    # 6. 分流處理：熱點事件 vs 獨立事件
     hot_groups = [g for g in groups if len(g) > 1]
     single_groups = [g for g in groups if len(g) == 1]
 
-    # 7. 排版成純文字格式（安全，防 Telegram 格式錯誤）
     message = "📊 【戰報】\n\n"
     
-    # 處理 2 則以上關聯的【熱點事件】
+    # 熱點
     if hot_groups:
-        for g_idx, group in enumerate(hot_groups, 1):
-            common_keywords = set.intersection(*(news_keywords[i] for i in group))
-            topic = "、".join(list(common_keywords)[:3]) if common_keywords else "綜合議題"
-            
-            message += f"🔥 【熱點：{topic}】（共關聯 {len(group)} 則報導）\n"
-            
+        for group in hot_groups:
+            message += f"🔥 【熱點】（共關聯 {len(group)} 則報導）\n"
             for n_idx in group:
                 item = news_list[n_idx]
                 title = item.get('title', '無標題').strip()
-                desc = item.get('description', '').strip()
+                summary = item.get('summary', '').strip()
                 link = item.get('link', '')
                 
-                # 防呆：如果真的沒摘要，就抓標題來用，絕不顯示空洞的「無摘要」
-                if not desc:
-                    desc = title
-                    
-                if len(desc) > 60:
-                    desc = desc[:60] + "..."
+                if not summary:
+                    summary = title
+                if len(summary) > 60:
+                    summary = summary[:60] + "..."
                     
                 message += f"📌 標題：{title}\n"
-                message += f"📝 摘要：{desc}\n"
+                message += f"📝 摘要：{summary}\n"
                 if link:
                     message += f"🔗 連結：{link}\n"
                 message += "-----------------------\n"
             message += "\n"
             
-    # 處理 只有 1 則的【獨立事件】
+    # 獨立事件
     if single_groups:
         message += "━━━━━━━━━━━━━━━━━━━\n"
-        message += "📰 其他（獨立事件） \n\n"
+        message += "📰 其他 \n\n"
         for g in single_groups:
             n_idx = g[0]
             item = news_list[n_idx]
             title = item.get('title', '無標題').strip()
-            desc = item.get('description', '').strip()
+            summary = item.get('summary', '').strip()
             link = item.get('link', '')
             
-            if not desc:
-                desc = title
-                
-            if len(desc) > 60:
-                desc = desc[:60] + "..."
+            if not summary:
+                summary = title
+            if len(summary) > 60:
+                summary = summary[:60] + "..."
                 
             message += f"📌 標題：{title}\n"
-            message += f"📝 摘要：{desc}\n"
+            message += f"📝 摘要：{summary}\n"
             if link:
                 message += f"🔗 連結：{link}\n"
             message += "-----------------------\n"
 
-    # 8. 【日誌監視器】在 GitHub 日誌上直接印出戰報內容
-    print("\n" + "="*50)
-    print("📢 【即將發送給 Telegram 的內容預覽】如下：")
-    print("="*50)
-    print(message)
-    print("="*50 + "\n")
-
-    # 9. 發送 Telegram (拿掉容易出錯的 Markdown 模式)
+    # 發送 Telegram
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id, 
-        "text": message
-    }
+    payload = {"chat_id": chat_id, "text": message}
     
     res = requests.post(url, json=payload)
     if res.status_code == 200:
         print("Telegram 戰報發送成功！")
     else:
-        print(f"發送失敗，錯誤碼: {res.status_code}")
-        print(f"錯誤訊息: {res.text}")
+        print(f"發送失敗，錯誤碼: {res.status_code}，訊息: {res.text}")
 
 if __name__ == "__main__":
     main()
