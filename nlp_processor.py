@@ -105,6 +105,13 @@ def main():
                 message += f"🔗 **連結**：{link}\n"
             message += "-----------------------\n"
 
+    # 👉 加在這裡：發送前，先在 GitHub Actions 的日誌中印出來檢查
+    print("\n" + "="*50)
+    print("📢 【即將發送給 Telegram 的內容預覽】如下：")
+    print("="*50)
+    print(message)
+    print("="*50 + "\n")
+
     # 7. 發送 Telegram
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
