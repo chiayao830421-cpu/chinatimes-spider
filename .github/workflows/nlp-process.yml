@@ -1,8 +1,9 @@
-name: CKIP NLP Processor
+name: ChinaTimes NLP Grouping
 
 on:
+  workflow_dispatch:
   repository_dispatch:
-    types: [trigger_news_nlp]
+    types: [trigger-nlp]
 
 jobs:
   build:
@@ -10,22 +11,31 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: '3.10'
+
+    # 🔥 核心：幫你把開源模型快取起來，不浪費 Actions 免費額度
+    - name: Cache HuggingFace Models
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/huggingface
+        key: ${{ runner.os }}-transformers-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-transformers-
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install ckip-transformers requests
+        pip install -r requirements.txt
 
     - name: Run NLP grouping
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        NEWS_DATA: ${{ toJSON(github.event.client_payload.news) }}
+        NEWS_DATA: ${{ github.event.client_payload.news_data }}
       run: |
         python nlp_processor.py
