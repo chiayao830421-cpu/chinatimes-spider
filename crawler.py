@@ -48,17 +48,22 @@ def run():
                 summary_tag = card.select_one('.intro, p')
                 summary = summary_tag.text.strip() if summary_tag else "點擊連結查看詳情"
                 
+                # 🌟 【新增】抓取發布時間：中時的列表時間通常在 class 為 .time 的標籤裡
+                time_tag = card.select_one('.time')
+                news_date = time_tag.text.strip() if time_tag else ""
+                
                 # 清理文字防止 XML 壞掉
                 summary = ' '.join(summary.split()).replace('"', "'")
                 
-                rss_content += f'<item>\n<title>{title}</title>\n<link>{link}</link>\n<description>{summary}</description>\n</item>\n'
+                # 🌟 【修改】在 XML 節點中補上 <pubDate>
+                rss_content += f'<item>\n<title>{title}</title>\n<link>{link}</link>\n<description>{summary}</description>\n<pubDate>{news_date}</pubDate>\n</item>\n'
                 success_count += 1
                 
             rss_content += '</channel>\n</rss>'
             
             with open('chinatimes.xml', 'w', encoding='utf-8') as f:
                 f.write(rss_content)
-            print(f'完成！成功抓取 {success_count} 則帶摘要的新聞。')
+            print(f'完成！成功抓取 {success_count} 則帶摘要與時間的新聞。')
 
     except Exception as e:
         print(f'嚴重錯誤: {e}')
