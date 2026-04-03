@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import requests
+import ast  # 引入抽象語法樹，用來安全地解析 JS 物件字串
 from sentence_transformers import SentenceTransformer, util
 
 def main():
@@ -14,40 +15,28 @@ def main():
     chat_id = sys.argv[2]
     news_data_str = sys.argv[3]
     
-    print(f"收到原始資料開頭: {news_data_str[:50]}...") # 方便 debug
+    print(f"收到原始資料開頭: {news_data_str[:100]}...") # 方便 debug
 
-    # 2. 超級防呆解析 JSON
+    # 2. 超級防呆解析 (使用 ast 繞過 JSON 嚴格的引號限制)
     news_list = []
     try:
-        # 第一次解碼
-        raw_data = json.loads(news_data_str)
+        print("嘗試使用 AST 解析類 JavaScript 陣列字串...")
+        # ast.literal_eval 可以完美解析 [{title: "..."}] 這種不規範的 JSON 寫法
+        news_list = ast.literal_eval(news_data_str)
         
-        # 如果 n8n 傳過來的是雙重 JSON 字串，我們再解碼一次！
-        if isinstance(raw_data, str):
-            print("偵測到雙重 JSON 字串，進行二次解碼...")
-            raw_data = json.loads(raw_data)
+        # 如果解析出來還是字串，再轉一次
+        if isinstance(news_list, str):
+            news_list = ast.literal_eval(news_list)
             
-        # 判定資料格式
-        if isinstance(raw_data, list):
-            news_list = raw_data
-        elif isinstance(raw_data, dict):
-            if "allNews" in raw_data:
-                news_list = raw_data["allNews"]
-            else:
-                news_list = [raw_data]
-                    
         print(f"\n🎉 成功接收到資料！總共抓取了 {len(news_list)} 則新聞。")
         
     except Exception as e:
-        print(f"解析 JSON 失敗: {e}")
-        print("嘗試啟動終極暴力正規化解析...")
-        # 如果還是失敗，代表開頭結尾有雜質，用暴力法把頭尾的引號修剪掉
+        print(f"AST 解析失敗: {e}")
+        print("嘗試啟動最後的 JSON 解析...")
         try:
-            trimmed_str = news_data_str.strip('"').replace('\\"', '"')
-            news_list = json.loads(trimmed_str)
-            print(f"🔥 暴力解析成功！共 {len(news_list)} 則新聞。")
+            news_list = json.loads(news_data_str)
         except Exception as e2:
-            print(f"暴力解析依然失敗: {e2}")
+            print(f"所有解析方法均失敗: {e2}")
             return
 
     if len(news_list) == 0:
@@ -86,7 +75,7 @@ def main():
                 
             similarity = util.cos_sim(embeddings[i], embeddings[j]).item()
             
-            # 閾值設定 0.65，大於這個值代表高機率在講同一件事
+            # 閾值設定 0.65
             if similarity > 0.65:
                 current_group.append(j)
                 processed[j] = True
