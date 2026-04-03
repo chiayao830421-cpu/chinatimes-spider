@@ -1,8 +1,8 @@
 import os
 import sys
 import json
+import re  # 引入正規表達式
 import requests
-import ast  # 引入抽象語法樹，用來安全地解析 JS 物件字串
 from sentence_transformers import SentenceTransformer, util
 
 def main():
@@ -17,24 +17,26 @@ def main():
     
     print(f"收到原始資料開頭: {news_data_str[:100]}...") # 方便 debug
 
-    # 2. 超級防呆解析 (使用 ast 繞過 JSON 嚴格的引號限制)
+    # 2. 暴力正規化解析 (專治沒有引號的 JavaScript Key)
     news_list = []
     try:
-        print("嘗試使用 AST 解析類 JavaScript 陣列字串...")
-        # ast.literal_eval 可以完美解析 [{title: "..."}] 這種不規範的 JSON 寫法
-        news_list = ast.literal_eval(news_data_str)
+        print("嘗試使用正規表達式修復 JavaScript Object 格式...")
         
-        # 如果解析出來還是字串，再轉一次
-        if isinstance(news_list, str):
-            news_list = ast.literal_eval(news_list)
-            
+        # 這一行會把 {title: "..."} 變成 {"title": "..."}
+        # 也就是在所有的 key (如 title, summary, link) 前後加上標準雙引號
+        fixed_str = re.sub(r'([{,]\s*)(\w+):', r'\1"\2":', news_data_str)
+        
+        # 將修正後的字串轉成 JSON
+        news_list = json.loads(fixed_str)
         print(f"\n🎉 成功接收到資料！總共抓取了 {len(news_list)} 則新聞。")
         
     except Exception as e:
-        print(f"AST 解析失敗: {e}")
-        print("嘗試啟動最後的 JSON 解析...")
+        print(f"Regex + JSON 解析失敗: {e}")
+        print("嘗試最後的降級手段 (AST)...")
         try:
-            news_list = json.loads(news_data_str)
+            import ast
+            news_list = ast.literal_eval(news_data_str)
+            print("🔥 AST 解析成功！")
         except Exception as e2:
             print(f"所有解析方法均失敗: {e2}")
             return
@@ -112,7 +114,7 @@ def main():
             
     if single_groups:
         message += "━━━━━━━━━━━━━━━━━━━\n"
-        message += "📰 其他 \n\n"
+        message += "📰 其他（獨立事件） \n\n"
         for g in single_groups:
             n_idx = g[0]
             item = news_list[n_idx]
