@@ -49,9 +49,9 @@ def run():
                 summary = summary_tag.text.strip() if summary_tag else "點擊連結查看詳情"
                 
                 # 🌟 【新增】抓取發布時間：中時的列表時間通常在 class 為 .time 的標籤裡
-                # 🌟 【加強版】多找幾種中時常用的時間標籤
-                time_tag = card.select_one('.time, span.time, div.time, .date')
-                news_date = time_tag.text.strip() if time_tag else ""
+                # 🌟 方案 A：直接找 time 標籤，並抓取它的 datetime 屬性
+                time_tag = card.select_one('.meta-info time')
+                news_date = time_tag['datetime'] if time_tag and time_tag.has_attr('datetime') else ""
                 
                 # 🛡️ 【備用方案】如果 class 真的都抓不到，直接從新聞連結裡把日期拔出來
                 if not news_date and 'link' in locals() and link:
