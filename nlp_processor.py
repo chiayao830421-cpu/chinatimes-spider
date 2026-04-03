@@ -12,29 +12,47 @@ def main():
         print("缺少 Telegram 設定")
         return
         
+    if not news_data_str:
+        print("沒有收到任何新聞資料")
+        return
+
+    # 1. 【核心修正】強大防呆解析：把 50 篇新聞全部救回來
     try:
-        news_list = json.loads(news_data_str)
+        raw_data = json.loads(news_data_str)
+        
+        # 判斷 n8n 傳過來的各種變形格式
+        if isinstance(raw_data, list):
+            news_list = raw_data
+        elif isinstance(raw_data, dict) and "data" in raw_data:
+            news_list = raw_data["data"]
+        else:
+            news_list = [raw_data] if raw_data else []
+            
+        print("\n" + "="*50)
+        print(f"🎉 成功接收到資料！總共抓取了 {len(news_list)} 則新聞。")
+        print("="*50 + "\n")
+        
     except Exception as e:
         print(f"解析 JSON 失敗: {e}")
         return
 
     if not news_list:
-        print("沒有新聞資料")
+        print("沒有新聞資料可以處理")
         return
 
-    # 1. 啟動中研院斷詞 (對標題進行斷詞)
+    # 2. 啟動中研院斷詞 (拿掉 level=3 以免報錯)
     titles = [news.get('title', '') for news in news_list]
-    print("正在進行中研院斷詞...")
+    print("正在進行中研院斷詞，請稍候...")
     ws_driver = CkipWordSegmenter()
     ws_results = ws_driver(titles)
 
-    # 2. 建立每則新聞的關鍵字特徵
+    # 3. 建立每則新聞的關鍵字特徵
     news_keywords = []
     for ws in ws_results:
         keywords = set([word for word in ws if len(word) > 1])
         news_keywords.append(keywords)
 
-    # 3. 智慧分組 (Jaccard 相似度)
+    # 4. 智慧分組 (Jaccard 相似度)
     groups = []
     for i, keywords in enumerate(news_keywords):
         placed = False
@@ -51,15 +69,15 @@ def main():
         if not placed:
             groups.append([i])
 
-    # 4. 依照關聯數量排序，把熱點排在最前面
+    # 5. 依照關聯數量排序，把熱點排在最前面
     groups.sort(key=lambda x: len(x), reverse=True)
 
-    # 5. 分流處理：熱點事件 vs 獨立事件
+    # 6. 分流處理：熱點事件 vs 獨立事件
     hot_groups = [g for g in groups if len(g) > 1]
     single_groups = [g for g in groups if len(g) == 1]
 
-    # 6. 排版成你指定的格式
-    message = "📊 【戰報】\n\n"
+    # 7. 排版成純文字格式（安全，防 Telegram 格式錯誤）
+    message = "📊 【中研院 NLP 智慧熱點戰報】\n\n"
     
     # 處理 2 則以上關聯的【熱點事件】
     if hot_groups:
@@ -72,62 +90,66 @@ def main():
             for n_idx in group:
                 item = news_list[n_idx]
                 title = item.get('title', '無標題').strip()
-                desc = item.get('description', '無摘要').strip()
+                desc = item.get('description', '').strip()
                 link = item.get('link', '')
                 
+                # 防呆：如果真的沒摘要，就抓標題來用，絕不顯示空洞的「無摘要」
+                if not desc:
+                    desc = title
+                    
                 if len(desc) > 60:
                     desc = desc[:60] + "..."
                     
-                message += f"📌 **標題**：{title}\n"
-                message += f"📝 **摘要**：{desc}\n"
+                message += f"📌 標題：{title}\n"
+                message += f"📝 摘要：{desc}\n"
                 if link:
-                    message += f"🔗 **連結**：{link}\n"
+                    message += f"🔗 連結：{link}\n"
                 message += "-----------------------\n"
             message += "\n"
             
     # 處理 只有 1 則的【獨立事件】
     if single_groups:
         message += "━━━━━━━━━━━━━━━━━━━\n"
-        message += "📰 其他 \n\n"
+        message += "📰 其他（獨立事件） \n\n"
         for g in single_groups:
             n_idx = g[0]
             item = news_list[n_idx]
             title = item.get('title', '無標題').strip()
-            desc = item.get('description', '無摘要').strip()
+            desc = item.get('description', '').strip()
             link = item.get('link', '')
             
+            if not desc:
+                desc = title
+                
             if len(desc) > 60:
                 desc = desc[:60] + "..."
                 
-            message += f"📌 **標題**：{title}\n"
-            message += f"📝 **摘要**：{desc}\n"
+            message += f"📌 標題：{title}\n"
+            message += f"📝 摘要：{desc}\n"
             if link:
-                message += f"🔗 **連結**：{link}\n"
+                message += f"🔗 連結：{link}\n"
             message += "-----------------------\n"
 
-    # 👉 加在這裡：發送前，先在 GitHub Actions 的日誌中印出來檢查
+    # 8. 【日誌監視器】在 GitHub 日誌上直接印出戰報內容
     print("\n" + "="*50)
     print("📢 【即將發送給 Telegram 的內容預覽】如下：")
     print("="*50)
     print(message)
     print("="*50 + "\n")
 
-    # 7. 發送 Telegram
+    # 9. 發送 Telegram (拿掉容易出錯的 Markdown 模式)
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id, 
-        "text": message,
-        "parse_mode": "Markdown"
+        "text": message
     }
     
     res = requests.post(url, json=payload)
-    if res.status_code != 200:
-        # 如果因為特殊字元導致 Markdown 失敗，降級用純文字發送
-        payload.pop("parse_mode")
-        requests.post(url, json=payload)
-        print("以純文字模式發送成功！")
-    else:
+    if res.status_code == 200:
         print("Telegram 戰報發送成功！")
+    else:
+        print(f"發送失敗，錯誤碼: {res.status_code}")
+        print(f"錯誤訊息: {res.text}")
 
 if __name__ == "__main__":
     main()
