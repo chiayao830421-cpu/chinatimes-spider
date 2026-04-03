@@ -77,7 +77,7 @@ def main():
     single_groups = [g for g in groups if len(g) == 1]
 
     # 7. 排版成純文字格式（安全，防 Telegram 格式錯誤）
-    message = "📊 【中研院 NLP 智慧熱點戰報】\n\n"
+    message = "📊 【戰報】\n\n"
     
     # 處理 2 則以上關聯的【熱點事件】
     if hot_groups:
