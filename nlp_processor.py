@@ -5,7 +5,7 @@ import requests
 from sentence_transformers import SentenceTransformer, util
 
 def main():
-    # 1. 從系統參數（sys.argv）直接讀取，避開 YAML 讀取問題
+    # 1. 讀取系統參數
     if len(sys.argv) < 4:
         print("錯誤：傳入的參數不足。")
         return
@@ -14,41 +14,41 @@ def main():
     chat_id = sys.argv[2]
     news_data_str = sys.argv[3]
     
-    if not token or token == "${{ secrets.TELEGRAM_TOKEN }}":
-        print("缺少 Telegram Token 或 GitHub Secrets 讀取失敗")
-        return
-        
-    if not chat_id:
-        print("缺少 Telegram Chat ID")
-        return
-        
-    if not news_data_str:
-        print("沒有收到任何新聞資料")
-        return
+    print(f"收到原始資料開頭: {news_data_str[:50]}...") # 方便 debug
 
-    # 2. 解析 n8n 丟過來的新聞陣列
+    # 2. 超級防呆解析 JSON
     news_list = []
     try:
+        # 第一次解碼
         raw_data = json.loads(news_data_str)
         
+        # 如果 n8n 傳過來的是雙重 JSON 字串，我們再解碼一次！
+        if isinstance(raw_data, str):
+            print("偵測到雙重 JSON 字串，進行二次解碼...")
+            raw_data = json.loads(raw_data)
+            
+        # 判定資料格式
         if isinstance(raw_data, list):
             news_list = raw_data
         elif isinstance(raw_data, dict):
             if "allNews" in raw_data:
                 news_list = raw_data["allNews"]
             else:
-                for val in raw_data.values():
-                    if isinstance(val, list):
-                        news_list = val
-                        break
-                if not news_list:
-                    news_list = [raw_data]
+                news_list = [raw_data]
                     
         print(f"\n🎉 成功接收到資料！總共抓取了 {len(news_list)} 則新聞。")
         
     except Exception as e:
         print(f"解析 JSON 失敗: {e}")
-        return
+        print("嘗試啟動終極暴力正規化解析...")
+        # 如果還是失敗，代表開頭結尾有雜質，用暴力法把頭尾的引號修剪掉
+        try:
+            trimmed_str = news_data_str.strip('"').replace('\\"', '"')
+            news_list = json.loads(trimmed_str)
+            print(f"🔥 暴力解析成功！共 {len(news_list)} 則新聞。")
+        except Exception as e2:
+            print(f"暴力解析依然失敗: {e2}")
+            return
 
     if len(news_list) == 0:
         print("沒有新聞資料可以處理")
@@ -63,7 +63,6 @@ def main():
     for item in news_list:
         title = item.get('title', '').strip()
         summary = item.get('summary', '').strip()
-        # 如果沒摘要就用標題
         text = f"{title} {summary if summary else title}"
         sentences.append(text)
 
@@ -85,7 +84,6 @@ def main():
             if processed[j]:
                 continue
                 
-            # 計算兩篇新聞的語意相似度
             similarity = util.cos_sim(embeddings[i], embeddings[j]).item()
             
             # 閾值設定 0.65，大於這個值代表高機率在講同一件事
@@ -100,9 +98,8 @@ def main():
     hot_groups = [g for g in groups if len(g) > 1]
     single_groups = [g for g in groups if len(g) == 1]
 
-    message = "📊 【開源 AI 智慧熱點戰報】\n\n"
+    message = "📊 【戰報】\n\n"
     
-    # 處理熱點
     if hot_groups:
         for group in hot_groups:
             message += f"🔥 【熱點】（共關聯 {len(group)} 則報導）\n"
@@ -124,10 +121,9 @@ def main():
                 message += "-----------------------\n"
             message += "\n"
             
-    # 處理獨立事件
     if single_groups:
         message += "━━━━━━━━━━━━━━━━━━━\n"
-        message += "📰 其他（獨立事件） \n\n"
+        message += "📰 其他 \n\n"
         for g in single_groups:
             n_idx = g[0]
             item = news_list[n_idx]
