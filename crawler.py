@@ -49,9 +49,19 @@ def run():
                 summary = summary_tag.text.strip() if summary_tag else "點擊連結查看詳情"
                 
                 # 🌟 【新增】抓取發布時間：中時的列表時間通常在 class 為 .time 的標籤裡
-                time_tag = card.select_one('.time')
+                # 🌟 【加強版】多找幾種中時常用的時間標籤
+                time_tag = card.select_one('.time, span.time, div.time, .date')
                 news_date = time_tag.text.strip() if time_tag else ""
                 
+                # 🛡️ 【備用方案】如果 class 真的都抓不到，直接從新聞連結裡把日期拔出來
+                if not news_date and 'link' in locals() and link:
+                    # 假設網址是 https://.../2026040300002...
+                    # 我們用簡單的切片或正則，把那串 8 位數的日期抓出來
+                    import re
+                    date_match = re.search(r'/(\d{8})\d+', link)
+                    if date_match:
+                        news_date = date_match.group(1) # 這會抓出 20260403
+                        
                 # 清理文字防止 XML 壞掉
                 summary = ' '.join(summary.split()).replace('"', "'")
                 
