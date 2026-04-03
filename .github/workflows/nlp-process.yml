@@ -1,0 +1,32 @@
+name: CKIP NLP Processor
+
+on:
+  repository_dispatch:
+    types: [trigger_news_nlp]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-state: 2026-04
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install ckip-transformers requests
+
+    - name: Run NLP grouping
+      env:
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        NEWS_DATA: ${{ github.event.client_payload.news }}
+      run: |
+        python nlp_processor.py
