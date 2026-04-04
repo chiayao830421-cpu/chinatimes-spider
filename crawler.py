@@ -1,24 +1,31 @@
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import sys
+import re
 
 def run():
     try:
         with sync_playwright() as p:
             print('啟動快閃爬蟲...')
             browser = p.chromium.launch(headless=True)
-            # 模擬更真實的 Mac Chrome 環境
+            # 模擬 Mac Chrome 環境
             context = browser.new_context(
                 user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             )
             page = context.new_page()
             
-            # 關鍵：不等 networkidle，只要 DOM 出來就開始
             print('前往中時政治版...')
             try:
                 page.goto('https://www.chinatimes.com/realtimenews/260407', wait_until='domcontentloaded', timeout=60000)
-                # 只等最關鍵的新聞標題出現，一旦出現立刻抓取
+                # 等待卡片外框載入
                 page.wait_for_selector('.article-list', timeout=15000)
+                
+                # 🌟 【新增】滾動網頁，讓中時載入第 11~20 則新聞
+                print('向下滑動網頁以載入更多新聞...')
+                page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+                # 稍等 1.5 秒讓網頁把後面的新聞生出來
+                page.wait_for_timeout(1500) 
+                
             except Exception as e:
                 print(f'頁面載入稍慢，嘗試直接解析內容... ({e})')
 
@@ -26,8 +33,9 @@ def run():
             browser.close()
             
             soup = BeautifulSoup(html, 'lxml')
-            # 這是目前中時最準確的卡片選擇器
-            cards = soup.select('.article-list li, .articlebox-v')[:10]
+            
+            # 🌟 【修改】把 [:10] 改成了 [:20]，讓它最多可以抓 20 則！
+            cards = soup.select('.article-list li, .articlebox-v')[:20]
             
             if not cards:
                 print('失敗：找不到新聞卡片，可能被 Cloudflare 攔截了。')
@@ -42,30 +50,27 @@ def run():
                 
                 title = title_tag.text.strip()
                 link = title_tag['href']
-                if not link.startswith('http'): link = 'https://www.chinatimes.com' + link
+                if not link.startswith('http'): 
+                    link = 'https://www.chinatimes.com' + link
                 
-                # 抓摘要：中時的摘要通常在 .intro 或 .vertical-box-text
+                # 抓摘要
                 summary_tag = card.select_one('.intro, p')
                 summary = summary_tag.text.strip() if summary_tag else "點擊連結查看詳情"
                 
-                # 🌟 【新增】抓取發布時間：中時的列表時間通常在 class 為 .time 的標籤裡
-                # 🌟 方案 A：直接找 time 標籤，並抓取它的 datetime 屬性
+                # 抓時間（方案 A）
                 time_tag = card.select_one('.meta-info time')
                 news_date = time_tag['datetime'] if time_tag and time_tag.has_attr('datetime') else ""
                 
-                # 🛡️ 【備用方案】如果 class 真的都抓不到，直接從新聞連結裡把日期拔出來
+                # 備用方案（從網址抓日期）
                 if not news_date and 'link' in locals() and link:
-                    # 假設網址是 https://.../2026040300002...
-                    # 我們用簡單的切片或正則，把那串 8 位數的日期抓出來
-                    import re
                     date_match = re.search(r'/(\d{8})\d+', link)
                     if date_match:
-                        news_date = date_match.group(1) # 這會抓出 20260403
+                        news_date = date_match.group(1) 
                         
-                # 清理文字防止 XML 壞掉
+                # 清理 XML 字元防爆
                 summary = ' '.join(summary.split()).replace('"', "'")
+                title = title.replace('"', "'")
                 
-                # 🌟 【修改】在 XML 節點中補上 <pubDate>
                 rss_content += f'<item>\n<title>{title}</title>\n<link>{link}</link>\n<description>{summary}</description>\n<pubDate>{news_date}</pubDate>\n</item>\n'
                 success_count += 1
                 
