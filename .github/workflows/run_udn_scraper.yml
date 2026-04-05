@@ -2,7 +2,7 @@ name: Run UDN Politics Scraper
 
 on:
   schedule:
-    - cron: '*/15 * * * *' # 每 15 分鐘自動執行一次
+    - cron: '0 * * * *' # 
   workflow_dispatch:      # 允許手動執行
 
 permissions:
