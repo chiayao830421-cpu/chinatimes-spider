@@ -6,7 +6,7 @@ import requests
 def fetch_udn_politics():
     url = "https://udn.com/api/more?page=1&channelId=2&type=cate_latest_news&cate_id=6638"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Referer": "https://udn.com/news/cate/2/6638",
     }
     
@@ -16,7 +16,6 @@ def fetch_udn_politics():
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             data = response.json()
-            # 兼容 lists 或 data 結構
             all_news = data.get("lists", []) if "lists" in data else data.get("data", [])
             print(f"📡 API 請求成功，原始資料共撈到 {len(all_news)} 則新聞。")
     except Exception as e:
@@ -30,11 +29,9 @@ news_list = fetch_udn_politics()
 # --- 2. 組裝純文字 ---
 text_content = ""
 
-# 🚨 防禦力點滿：如果完全沒抓到資料，至少寫下這行，不讓檔案空白！
 if not news_list:
     text_content = "title: 無最新新聞\nlink: 無\nsummary: API 抓取失敗或無資料\nmedia: 聯合報\ndate: 無\n"
 else:
-    # 就算判斷今天日期失敗，我們也至少強迫抓前 10 則最新新聞，絕不留白！
     for item in news_list[:10]: 
         title = item.get("title", "無標題").strip()
         
@@ -43,7 +40,7 @@ else:
         if link.startswith("/"):
             link = "https://udn.com" + link
             
-        # 處理摘要（沒有就拿標題補）
+        # 處理摘要
         summary_raw = item.get("paragraph", "")
         if not summary_raw:
             summary_raw = item.get("summary", "")
@@ -51,11 +48,16 @@ else:
         
         media = "聯合報"
         
-        # 處理時間
-        date = item.get("time", {}).get("dateTime", "")
-        if not date:
-            date = item.get("time", "無日期")
-        date = date.strip()
+        # 🚨 鐵桶防禦：徹底解決字典物件沒有 strip() 的問題
+        date_raw = item.get("time", "無日期")
+        
+        # 如果 time 欄位是個字典，我們就去抓裡面的 dateTime，抓不到就轉成字串
+        if isinstance(date_raw, dict):
+            date = date_raw.get("dateTime", str(date_raw))
+        else:
+            date = str(date_raw)
+            
+        date = date.strip() # 這時候絕對是字串了，100% 不會噴錯！
 
         # 寫入格式
         text_content += f"title: {title}\n"
@@ -65,7 +67,7 @@ else:
         text_content += f"date: {date}\n"
         text_content += "-" * 50 + "\n"
 
-# --- 3. 強制寫入檔案 (這段程式碼必須頂格，不能有空格縮排) ---
+# --- 3. 強制寫入檔案 ---
 print("💾 正在強行寫入檔案...")
 with open("udn_news.txt", "w", encoding="utf-8") as f:
     f.write(text_content)
