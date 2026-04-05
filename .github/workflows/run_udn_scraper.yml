@@ -2,20 +2,20 @@ name: Run UDN Politics Scraper
 
 on:
   schedule:
-    - cron: '*/15 * * * *' # 每 10 分鐘自動執行一次
+    - cron: '*/15 * * * *' # 每 15 分鐘自動執行一次
   workflow_dispatch:      # 允許手動執行
-  
+
 permissions:
-  contents: write
+  contents: write # 🚨 強制宣告這個工作流有寫入權限，這一步極度重要！
 
 jobs:
   scrape-and-save:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -25,16 +25,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Run udn_scraper.py
-        run: |
-          python .github/workflows/udn_scraper.py
-        env:
-          TZ: Asia/Taipei 
+      - name: Run UDN Scraper
+        run: python udn_scraper.py # 🚨 請確認你的 Python 檔名與路徑是正確的！
 
-      - name: Commit and Push changes
+      - name: Commit and Push txt file # 🚨 將產出的 txt 檔自動推回你的 GitHub 倉庫
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action Bot"
-          git add udn_today_news.json
-          git commit -m "🎉 Update UDN Today News (Triggered by n8n)" || echo "No new news to commit."
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add udn_news.txt || echo "No changes to add"
+          git commit -m "Update UDN news txt" || echo "No changes to commit"
           git push
