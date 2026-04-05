@@ -26,7 +26,7 @@ jobs:
           pip install requests
 
       - name: Run UDN Scraper
-        run: python udn_scraper.py # 🚨 請確認你的 Python 檔名與路徑是正確的！
+        run: python .github/workflows/udn_scraper.py
 
       - name: Commit and Push txt file # 🚨 將產出的 txt 檔自動推回你的 GitHub 倉庫
         run: |
