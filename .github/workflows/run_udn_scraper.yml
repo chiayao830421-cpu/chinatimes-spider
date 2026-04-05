@@ -1,9 +1,10 @@
 name: Run UDN Politics Scraper
 
 on:
-  # 🚨 這樣設定，n8n 就能用極簡的網址直接呼叫它
-  workflow_dispatch:
-
+  schedule:
+    - cron: '*/15 * * * *' # 每 10 分鐘自動執行一次
+  workflow_dispatch:      # 允許手動執行
+  
 permissions:
   contents: write
 
