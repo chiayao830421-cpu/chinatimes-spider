@@ -1,1 +1,49 @@
+name: Run Upmedia Scraper
 
+on:
+  # 1. 支援手動觸發測試
+  workflow_dispatch:
+  
+  # 2. 定時自動觸發：設定為每小時執行一次
+  schedule:
+    - cron: '0 * * * *'
+
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 套件 1：切換到你的專案目錄
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    # 套件 2：安裝 Python 環境
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    # 套件 3：安裝爬蟲必備的第三方套件
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests beautifulsoup4
+
+    # 套件 4：執行爬蟲，產出 upmedia_news.txt
+    - name: Run Scraper
+      run: python upmedia_scraper.py
+
+    # 套件 5：把產出的 upmedia_news.txt 推回 GitHub 儲存庫
+    - name: Commit and Push changes
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add upmedia_news.txt
+        
+        # 檢查檔案是否有變動，有變動才 commit，避免 workflow 報錯
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "🤖 自動更新：上報每小時政治與調查新聞"
+          git push
+        fi
